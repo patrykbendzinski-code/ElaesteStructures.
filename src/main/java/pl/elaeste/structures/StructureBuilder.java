@@ -207,7 +207,7 @@ final class StructureBuilder {
         box(w,x-8,y-1,z-8,x+8,y-1,z+8,Material.CALCITE);
         room(w,x,y,z,6,6,7,Material.QUARTZ_PILLAR,Material.SMOOTH_QUARTZ);
         chestSet(w,x,y+2,z,r);chestHidden(w,x-17,y+14,z,r);chestVault(w,x+17,y+22,z,r);
-        for(int dx=-6;dx<=6;dx+=3)for(int dz=-6;dz<=6;dz+=3)b(w,x+dx,y+10,z+dz,Material.CHAIN);
+        for(int dx=-6;dx<=6;dx+=3)for(int dz=-6;dz<=6;dz+=3)b(w,x+dx,y+10,z+dz,Material.IRON_BARS);
     }
     private void elven(World w,int x,int y,int z,Random r){
         box(w,x-24,y-1,z-24,x+24,y-1,z+24,Material.GRASS_BLOCK);
