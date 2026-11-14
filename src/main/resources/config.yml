@@ -1,4 +1,4 @@
-# Elaeste Structures - initial settings
+# Elaeste Structures 2.0
 world-name: World
 
 elaeste:
@@ -7,22 +7,38 @@ elaeste:
   min-z: -3800
   max-z: 3800
   chance-per-chunk: 0.025
-  max-structures: 46
-  min-distance: 150
+  min-distance: 190
   quotas:
-    castle_medium: 5
-    castle_large: 3
-    tower: 8
-    ruin: 10
-    settlement: 10
-    camp: 10
+    castle: 6
+    mushroom_loft: 5
+    fantasy_tower: 5
+    magical_keep: 5
+    dragon_fortress: 5
+    sky_kingdom: 4
+    elven_city: 4
+    cursed_manor: 4
+    dwarven_mine: 4
+    desert_temple: 4
 
 outside:
   enabled: true
-  chance-per-chunk: 0.02
-  min-distance: 150
+  chance-per-chunk: 0.012
+  min-distance: 220
 
 generation:
   avoid-water: true
-  max-height-difference: 5
-  # Structures are built on existing terrain. Player builds are not protected.
+  max-height-difference: 7
+
+# Number of occupied chest slots. Every generated chest receives real items.
+loot:
+  common:
+    min-items: 7
+    max-items: 11
+  rare:
+    min-items: 8
+    max-items: 13
+  legendary:
+    min-items: 10
+    max-items: 16
+
+# Elytra is intentionally excluded from all structure loot tables.

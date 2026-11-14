@@ -1,274 +1,214 @@
 package pl.elaeste.structures;
 
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.World;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
+import org.bukkit.*;
+import org.bukkit.block.Biome;
+import org.bukkit.command.*;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.*;
+import org.bukkit.event.player.*;
 import org.bukkit.plugin.java.JavaPlugin;
-
 import java.io.File;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 public final class ElaesteStructures extends JavaPlugin implements Listener, CommandExecutor {
+    static final List<String> TYPES = List.of("castle","mushroom_loft","fantasy_tower","magical_keep",
+            "dragon_fortress","sky_kingdom","elven_city","cursed_manor","dwarven_mine","desert_temple");
     private final List<Placement> placements = new ArrayList<>();
     private File placementsFile;
-    private org.bukkit.configuration.file.YamlConfiguration placementsYaml;
+    private org.bukkit.configuration.file.YamlConfiguration data;
     private StructureBuilder builder;
 
-    @Override
-    public void onEnable() {
-        saveDefaultConfig();
-        loadPlacements();
-        builder = new StructureBuilder(this);
+    @Override public void onEnable() {
+        saveDefaultConfig(); loadPlacements(); builder = new StructureBuilder(this);
         Bukkit.getPluginManager().registerEvents(this, this);
-        if (getCommand("elaeste") != null) getCommand("elaeste").setExecutor(this);
-        getLogger().info("ElaesteStructures enabled. Loaded " + placements.size() + " saved placements.");
+        Objects.requireNonNull(getCommand("elaeste")).setExecutor(this);
+        getLogger().info("Elaeste Structures 2.0 enabled. Placements: " + placements.size());
+    }
+    @Override public void onDisable() { savePlacements(); }
+
+    @EventHandler public void onJoin(PlayerJoinEvent e) { check(e.getPlayer(), e.getPlayer().getLocation()); }
+    @EventHandler public void onMove(PlayerMoveEvent e) {
+        if (e.getTo()==null) return;
+        if ((e.getFrom().getBlockX()>>4)!=(e.getTo().getBlockX()>>4) ||
+            (e.getFrom().getBlockZ()>>4)!=(e.getTo().getBlockZ()>>4)) check(e.getPlayer(),e.getTo());
+    }
+    @EventHandler public void onTeleport(PlayerTeleportEvent e) {
+        if(e.getTo()!=null) check(e.getPlayer(),e.getTo());
     }
 
-    @Override
-    public void onDisable() {
-        savePlacements();
-    }
-
-    @EventHandler
-    public void onJoin(PlayerJoinEvent event) {
-        checkPlayerLocation(event.getPlayer(), event.getPlayer().getLocation());
-    }
-
-    @EventHandler
-    public void onMove(PlayerMoveEvent event) {
-        if (event.getTo() == null) return;
-        if (event.getFrom().getBlockX() >> 4 != event.getTo().getBlockX() >> 4
-                || event.getFrom().getBlockZ() >> 4 != event.getTo().getBlockZ() >> 4) {
-            checkPlayerLocation(event.getPlayer(), event.getTo());
+    // Intercept the vanilla-looking syntax before the server's built-in /locate command.
+    // This makes /locate structure search this plugin's saved generated structures.
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onLocatePreprocess(PlayerCommandPreprocessEvent e) {
+        String[] parts = e.getMessage().trim().split("\\s+");
+        if (parts.length >= 2 && parts[0].equalsIgnoreCase("/locate")
+                && parts[1].equalsIgnoreCase("structure")) {
+            e.setCancelled(true);
+            String[] args = Arrays.copyOfRange(parts, 2, parts.length);
+            locateStructure(e.getPlayer(), args);
         }
     }
 
-    @EventHandler
-    public void onTeleport(PlayerTeleportEvent event) {
-        if (event.getTo() != null) checkPlayerLocation(event.getPlayer(), event.getTo());
+    private void check(Player player, Location loc) {
+        if(loc.getWorld()==null || !loc.getWorld().getName().equalsIgnoreCase(getConfig().getString("world-name","World"))) return;
+        int cx=loc.getBlockX()>>4, cz=loc.getBlockZ()>>4;
+        long seed=loc.getWorld().getSeed() ^ ((long)cx*341873128712L) ^ ((long)cz*132897987541L);
+        Random r=new Random(seed);
+        boolean inside=isInside(loc.getBlockX(),loc.getBlockZ());
+        if(!inside && !getConfig().getBoolean("outside.enabled",true)) return;
+        double chance=getConfig().getDouble(inside?"elaeste.chance-per-chunk":"outside.chance-per-chunk",inside?0.025:0.012);
+        if(r.nextDouble()>=chance) return;
+        int x=(cx<<4)+4+r.nextInt(8), z=(cz<<4)+4+r.nextInt(8);
+        if(inside && !isInside(x,z)) return;
+        String type=inside?nextQuotaType():randomType(r);
+        if(type==null || !footprintFits(x,z,type,inside)) return;
+        if(!farEnough(loc.getWorld(),x,z,getConfig().getInt(inside?"elaeste.min-distance":"outside.min-distance",180))) return;
+        builder.tryBuild(loc.getWorld(),x,z,type,r);
     }
-
-    private void checkPlayerLocation(Player player, Location location) {
-        String worldName = getConfig().getString("world-name", "World");
-        if (!location.getWorld().getName().equalsIgnoreCase(worldName)) return;
-
-        int chunkX = location.getBlockX() >> 4;
-        int chunkZ = location.getBlockZ() >> 4;
-        long seed = location.getWorld().getSeed()
-                ^ (((long) chunkX) * 341873128712L)
-                ^ (((long) chunkZ) * 132897987541L);
-        Random random = new Random(seed);
-
-        boolean inElaeste = isInsideElaeste(location.getBlockX(), location.getBlockZ());
-        double chance = getConfig().getDouble(
-                inElaeste ? "elaeste.chance-per-chunk" : "outside.chance-per-chunk",
-                inElaeste ? 0.025 : 0.02);
-
-        if (!inElaeste && !getConfig().getBoolean("outside.enabled", true)) return;
-        if (random.nextDouble() >= chance) return;
-
-        // Keep one deterministic candidate point per chunk so revisiting a chunk
-        // cannot repeatedly reroll a new structure.
-        int x = (chunkX << 4) + 4 + random.nextInt(8);
-        int z = (chunkZ << 4) + 4 + random.nextInt(8);
-        if (inElaeste && !isInsideElaeste(x, z)) return;
-
-        String type = inElaeste ? nextElaesteType() : randomOutsideType(random);
-        if (type == null) return;
-        if (!footprintStaysInItsArea(x, z, type, inElaeste)) return;
-
-        int minDistance = getConfig().getInt(
-                inElaeste ? "elaeste.min-distance" : "outside.min-distance", 150);
-        if (!farEnough(location.getWorld(), x, z, minDistance)) return;
-
-        // Run on the main server thread; the player movement event already runs there.
-        builder.tryBuild(location.getWorld(), x, z, type, random);
+    private boolean isInside(int x,int z) {
+        return x>=getConfig().getInt("elaeste.min-x",-3800)&&x<=getConfig().getInt("elaeste.max-x",3800)
+            &&z>=getConfig().getInt("elaeste.min-z",-3800)&&z<=getConfig().getInt("elaeste.max-z",3800);
     }
-
-    private boolean isInsideElaeste(int x, int z) {
-        return x >= getConfig().getInt("elaeste.min-x", -3800)
-                && x <= getConfig().getInt("elaeste.max-x", 3800)
-                && z >= getConfig().getInt("elaeste.min-z", -3800)
-                && z <= getConfig().getInt("elaeste.max-z", 3800);
-    }
-
-    private boolean footprintStaysInItsArea(int x, int z, String type, boolean inElaeste) {
-        int radius = switch (type) {
-            case "castle_large" -> 19;
-            case "castle_medium" -> 14;
-            case "settlement" -> 13;
-            case "ruin" -> 10;
-            case "camp" -> 8;
-            default -> 7;
+    private int radius(String t) {
+        return switch(t) {
+            case "castle","magical_keep","dragon_fortress","sky_kingdom","elven_city","dwarven_mine" -> 30;
+            case "mushroom_loft","cursed_manor","desert_temple" -> 24;
+            default -> 18;
         };
-        int minX = getConfig().getInt("elaeste.min-x", -3800);
-        int maxX = getConfig().getInt("elaeste.max-x", 3800);
-        int minZ = getConfig().getInt("elaeste.min-z", -3800);
-        int maxZ = getConfig().getInt("elaeste.max-z", 3800);
-
-        if (inElaeste) {
-            return x - radius >= minX && x + radius <= maxX
-                    && z - radius >= minZ && z + radius <= maxZ;
-        }
-        // Outside structures must not spill across the Elaeste rectangle.
-        return x + radius < minX || x - radius > maxX
-                || z + radius < minZ || z - radius > maxZ;
     }
-
-    private String nextElaesteType() {
-        Map<String, Integer> quotas = new java.util.LinkedHashMap<>();
-        for (String type : List.of("castle_medium", "castle_large", "tower", "ruin", "settlement", "camp")) {
-            int target = getConfig().getInt("elaeste.quotas." + type, 0);
-            int done = countType(type);
-            if (done < target) quotas.put(type, target - done);
+    private boolean footprintFits(int x,int z,String type,boolean inside) {
+        int r=radius(type), minX=getConfig().getInt("elaeste.min-x",-3800),maxX=getConfig().getInt("elaeste.max-x",3800),
+            minZ=getConfig().getInt("elaeste.min-z",-3800),maxZ=getConfig().getInt("elaeste.max-z",3800);
+        if(inside) return x-r>=minX&&x+r<=maxX&&z-r>=minZ&&z+r<=maxZ;
+        return x+r<minX||x-r>maxX||z+r<minZ||z-r>maxZ;
+    }
+    private String nextQuotaType() {
+        Map<String,Integer> remaining=new LinkedHashMap<>();
+        for(String t:TYPES) { int target=getConfig().getInt("elaeste.quotas."+t, t.equals("castle")?6:4);
+            int count=(int)placements.stream().filter(p->p.type.equals(t)&&isInside(p.x,p.z)).count();
+            if(count<target) remaining.put(t,target-count);
         }
-        if (quotas.isEmpty()) return null;
-
-        int totalRemaining = quotas.values().stream().mapToInt(Integer::intValue).sum();
-        int pick = new Random().nextInt(totalRemaining);
-        for (Map.Entry<String, Integer> entry : quotas.entrySet()) {
-            pick -= entry.getValue();
-            if (pick < 0) return entry.getKey();
-        }
+        int total=remaining.values().stream().mapToInt(i->i).sum(); if(total==0)return null;
+        int pick=new Random().nextInt(total);
+        for(var e:remaining.entrySet()){pick-=e.getValue();if(pick<0)return e.getKey();}
         return null;
     }
-
-    private String randomOutsideType(Random random) {
-        String[] types = {"castle_medium", "castle_large", "tower", "ruin", "settlement", "camp"};
-        return types[random.nextInt(types.length)];
+    private String randomType(Random r) {
+        // Sky Kingdom and Dragon Fortress are deliberately rarer outside the map.
+        int n=r.nextInt(100);
+        if(n<7)return "sky_kingdom"; if(n<16)return "dragon_fortress";
+        return TYPES.get(r.nextInt(8));
     }
-
-    private int countType(String type) {
-        return (int) placements.stream().filter(p -> p.type.equals(type)
-                && isInsideElaeste(p.x, p.z)).count();
+    private boolean farEnough(World w,int x,int z,int d) {
+        long d2=(long)d*d;
+        for(Placement p:placements) if(p.world.equals(w.getName())) {
+            long dx=(long)p.x-x,dz=(long)p.z-z;if(dx*dx+dz*dz<d2)return false;
+        } return true;
     }
-
-    private boolean farEnough(World world, int x, int z, int minDistance) {
-        long min2 = (long) minDistance * minDistance;
-        for (Placement p : placements) {
-            if (!p.world.equals(world.getName())) continue;
-            long dx = (long) p.x - x;
-            long dz = (long) p.z - z;
-            if (dx * dx + dz * dz < min2) return false;
-        }
-        return true;
+    void record(World w,int x,int y,int z,String type) {
+        placements.add(new Placement(w.getName(),x,y,z,type)); savePlacements();
     }
-
-    void recordPlacement(World world, int x, int y, int z, String type) {
-        placements.add(new Placement(world.getName(), x, y, z, type));
-        savePlacements();
-    }
-
-    public int getPlacementCount() {
-        return placements.size();
-    }
-
-    public int getElaesteCount() {
-        return (int) placements.stream().filter(p -> isInsideElaeste(p.x, p.z)).count();
-    }
-
-    public int getOutsideCount() {
-        return placements.size() - getElaesteCount();
-    }
-
     private void loadPlacements() {
-        placementsFile = new File(getDataFolder(), "placements.yml");
-        if (!placementsFile.exists()) {
-            try {
-                getDataFolder().mkdirs();
-                placementsFile.createNewFile();
-            } catch (Exception ex) {
-                getLogger().severe("Could not create placements.yml: " + ex.getMessage());
-            }
-        }
-        placementsYaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(placementsFile);
-        for (String key : placementsYaml.getKeys(false)) {
-            String world = placementsYaml.getString(key + ".world", "");
-            String type = placementsYaml.getString(key + ".type", "unknown");
-            int x = placementsYaml.getInt(key + ".x");
-            int y = placementsYaml.getInt(key + ".y");
-            int z = placementsYaml.getInt(key + ".z");
-            if (!world.isBlank()) placements.add(new Placement(world, x, y, z, type));
+        placementsFile=new File(getDataFolder(),"placements.yml");
+        if(!placementsFile.exists()){getDataFolder().mkdirs();try{placementsFile.createNewFile();}catch(Exception ignored){}}
+        data=org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(placementsFile);
+        for(String k:data.getKeys(false)) {
+            String world=data.getString(k+".world",""),type=data.getString(k+".type","");
+            if(!world.isBlank()&&!type.isBlank()) placements.add(new Placement(world,data.getInt(k+".x"),data.getInt(k+".y"),data.getInt(k+".z"),type));
         }
     }
-
     private void savePlacements() {
-        if (placementsYaml == null || placementsFile == null) return;
-        placementsYaml = new org.bukkit.configuration.file.YamlConfiguration();
-        for (int i = 0; i < placements.size(); i++) {
-            Placement p = placements.get(i);
-            String key = "p" + i;
-            placementsYaml.set(key + ".world", p.world);
-            placementsYaml.set(key + ".x", p.x);
-            placementsYaml.set(key + ".y", p.y);
-            placementsYaml.set(key + ".z", p.z);
-            placementsYaml.set(key + ".type", p.type);
-        }
-        try {
-            placementsYaml.save(placementsFile);
-        } catch (Exception ex) {
-            getLogger().severe("Could not save placements.yml: " + ex.getMessage());
-        }
+        if(data==null||placementsFile==null)return;
+        data=new org.bukkit.configuration.file.YamlConfiguration();
+        for(int i=0;i<placements.size();i++){Placement p=placements.get(i);String k="p"+i;
+            data.set(k+".world",p.world);data.set(k+".x",p.x);data.set(k+".y",p.y);data.set(k+".z",p.z);data.set(k+".type",p.type);}
+        try{data.save(placementsFile);}catch(Exception ex){getLogger().warning("Could not save placements: "+ex.getMessage());}
     }
-
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("elaeste.admin")) {
-            sender.sendMessage(ChatColor.RED + "Nie masz uprawnien.");
-            return true;
-        }
-        if (args.length == 0 || args[0].equalsIgnoreCase("status")) {
-            sender.sendMessage(ChatColor.GOLD + "Elaeste Structures");
-            sender.sendMessage(ChatColor.YELLOW + "Wszystkie zapisane budowle: " + placements.size());
-            sender.sendMessage(ChatColor.YELLOW + "W granicach Elaeste: " + getElaesteCount() + "/46");
-            sender.sendMessage(ChatColor.YELLOW + "Poza Elaeste: " + getOutsideCount());
-            return true;
-        }
-        if (args[0].equalsIgnoreCase("reload")) {
-            reloadConfig();
-            sender.sendMessage(ChatColor.GREEN + "Konfiguracja przeladowana.");
-            return true;
-        }
-        if (args[0].equalsIgnoreCase("generate")) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage(ChatColor.RED + "Tej komendy uzyj w grze.");
-                return true;
-            }
-            Location loc = player.getLocation();
-            if (!loc.getWorld().getName().equalsIgnoreCase(getConfig().getString("world-name", "World"))) {
-                sender.sendMessage(ChatColor.RED + "Jestes w innym swiecie.");
-                return true;
-            }
-            String type = isInsideElaeste(loc.getBlockX(), loc.getBlockZ())
-                    ? nextElaesteType() : randomOutsideType(new Random());
-            if (type == null) {
-                sender.sendMessage(ChatColor.RED + "Limit 46 budowli na Elaeste zostal osiagniety.");
-                return true;
-            }
-            if (builder.tryBuild(loc.getWorld(), loc.getBlockX(), loc.getBlockZ(), type, new Random())) {
-                sender.sendMessage(ChatColor.GREEN + "Wygenerowano: " + type);
+    @Override public boolean onCommand(CommandSender s,Command c,String label,String[] a) {
+        if (c.getName().equalsIgnoreCase("locate")) {
+            if (a.length > 0 && a[0].equalsIgnoreCase("structure")) {
+                locateStructure(s, Arrays.copyOfRange(a, 1, a.length));
             } else {
-                sender.sendMessage(ChatColor.RED + "Nie mozna wygenerowac budowli w tym miejscu. Sprobuj na rowniejszym terenie.");
+                s.sendMessage(ChatColor.YELLOW + "Uzycie: /locate structure [typ]");
             }
             return true;
         }
-        sender.sendMessage(ChatColor.YELLOW + "Uzycie: /elaeste <status|reload|generate>");
+        if (a.length > 0 && a[0].equalsIgnoreCase("locate")) {
+            if (a.length > 1 && a[1].equalsIgnoreCase("structure")) {
+                locateStructure(s, Arrays.copyOfRange(a, 2, a.length));
+            } else {
+                locateStructure(s, Arrays.copyOfRange(a, 1, a.length));
+            }
+            return true;
+        }
+        if(!s.hasPermission("elaeste.admin")){s.sendMessage(ChatColor.RED+"Brak uprawnien.");return true;}
+        if(a.length==0||a[0].equalsIgnoreCase("status")) {
+            s.sendMessage(ChatColor.GOLD+"Elaeste Structures 2.0");
+            s.sendMessage(ChatColor.YELLOW+"Zapisane struktury: "+placements.size()+" | Elaeste: "+countInside()+" | Poza: "+(placements.size()-countInside()));
+            s.sendMessage(ChatColor.GRAY+"Nowy zestaw: 10 typow. Elytra nie wystepuje w skrzyniach."); return true;
+        }
+        if(a[0].equalsIgnoreCase("reload")){reloadConfig();s.sendMessage(ChatColor.GREEN+"Config przeladowany.");return true;}
+        if(a[0].equalsIgnoreCase("generate")) {
+            if(!(s instanceof Player p)){s.sendMessage("Tej komendy uzyj w grze.");return true;}
+            Location l=p.getLocation();String t=a.length>1?normalise(a[1]):randomType(new Random());
+            if(t==null){p.sendMessage(ChatColor.RED+"Nieznany typ. Typy: "+String.join(", ",TYPES));return true;}
+            if(builder.tryBuild(l.getWorld(),l.getBlockX(),l.getBlockZ(),t,new Random()))p.sendMessage(ChatColor.GREEN+"Wygenerowano "+t);
+            else p.sendMessage(ChatColor.RED+"Nie udalo sie: teren jest zbyt nierowny lub nie ma miejsca.");
+            return true;
+        }
+        if(a[0].equalsIgnoreCase("locate")) {
+            if(!(s instanceof Player p)){s.sendMessage("Tej komendy uzyj w grze.");return true;}
+            String wanted=a.length>1?normalise(a[1]):null; Placement best=null;double bestD=Double.MAX_VALUE;
+            for(Placement pl:placements) if(pl.world.equals(p.getWorld().getName())&&(wanted==null||pl.type.equals(wanted))) {
+                double d=p.getLocation().distanceSquared(new Location(p.getWorld(),pl.x,pl.y,pl.z));
+                if(d<bestD){bestD=d;best=pl;}
+            }
+            if(best==null)p.sendMessage(ChatColor.RED+"Nie znaleziono zapisanej struktury tego typu.");
+            else p.sendMessage(ChatColor.GREEN+"Najblizsza: "+best.type+" X:"+best.x+" Y:"+best.y+" Z:"+best.z+" ("+(int)Math.sqrt(bestD)+" blokow)");
+            return true;
+        }
+        s.sendMessage(ChatColor.YELLOW+"Uzycie: /elaeste <status|reload|generate [typ]|locate structure [typ]>");
         return true;
     }
+    private void locateStructure(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("Tej komendy uzyj jako gracz.");
+            return;
+        }
+        String wanted = null;
+        if (args.length > 0) {
+            wanted = normalise(args[0]);
+            if (wanted == null) {
+                player.sendMessage(ChatColor.RED + "Nieznany typ. Dostepne: " + String.join(", ", TYPES));
+                return;
+            }
+        }
+        Placement best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (Placement placement : placements) {
+            if (!placement.world.equals(player.getWorld().getName())) continue;
+            if (wanted != null && !placement.type.equals(wanted)) continue;
+            double distance = player.getLocation().distanceSquared(
+                    new Location(player.getWorld(), placement.x, placement.y, placement.z));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = placement;
+            }
+        }
+        if (best == null) {
+            player.sendMessage(ChatColor.RED + "Nie znaleziono zapisanej struktury"
+                    + (wanted == null ? "." : " typu " + wanted + "."));
+        } else {
+            player.sendMessage(ChatColor.GREEN + "Najblizsza struktura: " + best.type
+                    + " | X: " + best.x + " Y: " + best.y + " Z: " + best.z
+                    + " | Odleglosc: " + (int) Math.sqrt(bestDistance) + " blokow");
+        }
+    }
 
-    record Placement(String world, int x, int y, int z, String type) {}
+    private String normalise(String in) {
+        String q=in.toLowerCase(Locale.ROOT).replace('-','_');
+        return TYPES.contains(q)?q:null;
+    }
+    private long countInside(){return placements.stream().filter(p->isInside(p.x,p.z)).count();}
+    record Placement(String world,int x,int y,int z,String type) {}
 }

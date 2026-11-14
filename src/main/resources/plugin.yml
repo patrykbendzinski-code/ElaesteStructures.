@@ -1,14 +1,17 @@
 name: ElaesteStructures
-version: 1.0.0
+version: 2.0.0
 main: pl.elaeste.structures.ElaesteStructures
 api-version: '1.21'
-author: OpenAI
-description: Procedural fantasy structures for the Elaeste map and the surrounding overworld.
+author: Elaeste
+description: Ten procedural fantasy RPG structures with filled treasure chests.
 commands:
   elaeste:
     description: Elaeste Structures administration
-    usage: /elaeste <status|reload|generate>
+    usage: /elaeste <status|reload|generate [type]|locate structure [type]>
     permission: elaeste.admin
+  locate:
+    description: Locate a generated Elaeste structure
+    usage: /locate structure [type]
 permissions:
   elaeste.admin:
     description: Allows administration of Elaeste Structures
