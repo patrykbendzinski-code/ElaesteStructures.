@@ -1,0 +1,15 @@
+name: ElaesteStructures
+version: 1.0.0
+main: pl.elaeste.structures.ElaesteStructures
+api-version: '1.21'
+author: OpenAI
+description: Procedural fantasy structures for the Elaeste map and the surrounding overworld.
+commands:
+  elaeste:
+    description: Elaeste Structures administration
+    usage: /elaeste <status|reload|generate>
+    permission: elaeste.admin
+permissions:
+  elaeste.admin:
+    description: Allows administration of Elaeste Structures
+    default: op

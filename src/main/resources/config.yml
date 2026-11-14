@@ -1,0 +1,28 @@
+# Elaeste Structures - initial settings
+world-name: World
+
+elaeste:
+  min-x: -3800
+  max-x: 3800
+  min-z: -3800
+  max-z: 3800
+  chance-per-chunk: 0.025
+  max-structures: 46
+  min-distance: 150
+  quotas:
+    castle_medium: 5
+    castle_large: 3
+    tower: 8
+    ruin: 10
+    settlement: 10
+    camp: 10
+
+outside:
+  enabled: true
+  chance-per-chunk: 0.02
+  min-distance: 150
+
+generation:
+  avoid-water: true
+  max-height-difference: 5
+  # Structures are built on existing terrain. Player builds are not protected.
